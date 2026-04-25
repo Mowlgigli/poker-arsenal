@@ -528,10 +528,12 @@ async function toggleRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
+    const mimeType = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
     mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
     mediaRecorder.onstop = () => {
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      const mime = mimeType || 'audio/mp4';
+      const blob = new Blob(audioChunks, { type: mime });
       const reader = new FileReader();
       reader.onload = e => { pendingAudio = e.target.result; pendingAudioDuration = fmtTime(recSeconds); renderAudioPreview(pendingAudioDuration); };
       reader.readAsDataURL(blob);
@@ -553,8 +555,34 @@ function stopRecording(save) {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 }
 
-function playAudio(catId, index) { const m = data.moves[catId][index]; if (m&&m.audio) new Audio(m.audio).play(); }
-function playPendingAudio() { if (pendingAudio) new Audio(pendingAudio).play(); }
+function base64ToBlob(base64) {
+  const parts = base64.split(';base64,');
+  const mime = parts[0].split(':')[1];
+  const raw = atob(parts[1]);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+function playAudioData(base64) {
+  try {
+    const blob = base64ToBlob(base64);
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play().catch(() => {
+      // fallback direct
+      const a2 = new Audio(base64);
+      a2.play();
+    });
+    audio.onended = () => URL.revokeObjectURL(url);
+  } catch(e) {
+    const audio = new Audio(base64);
+    audio.play();
+  }
+}
+
+function playAudio(catId, index) { const m = data.moves[catId][index]; if (m&&m.audio) playAudioData(m.audio); }
+function playPendingAudio() { if (pendingAudio) playAudioData(pendingAudio); }
 
 function openLightbox(catId, moveIdx, photoIdx) {
   document.getElementById('lightbox-img').src = data.moves[catId][moveIdx].photos[photoIdx];
